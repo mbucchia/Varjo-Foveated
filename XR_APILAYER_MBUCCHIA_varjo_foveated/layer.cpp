@@ -71,23 +71,6 @@ namespace {
                               TLArg(createInfo->createFlags, "CreateFlags"));
             Log(fmt::format("Application: {}\n", createInfo->applicationInfo.applicationName));
 
-            // Here there can be rules to disable the API layer entirely (based on applicationName for example).
-            // m_bypassApiLayer = ...
-
-            if (m_bypassApiLayer) {
-                Log(fmt::format("{} layer will be bypassed\n", LayerName));
-                return XR_SUCCESS;
-            }
-
-            for (uint32_t i = 0; i < createInfo->enabledApiLayerCount; i++) {
-                TraceLoggingWrite(
-                    g_traceProvider, "xrCreateInstance", TLArg(createInfo->enabledApiLayerNames[i], "ApiLayerName"));
-            }
-            for (uint32_t i = 0; i < createInfo->enabledExtensionCount; i++) {
-                TraceLoggingWrite(
-                    g_traceProvider, "xrCreateInstance", TLArg(createInfo->enabledExtensionNames[i], "ExtensionName"));
-            }
-
             // Needed to resolve the requested function pointers.
             OpenXrApi::xrCreateInstance(createInfo);
 
@@ -102,70 +85,289 @@ namespace {
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
             Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
+            // Check for system capabilities.
+            XrSystemId systemId;
+            XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
+            systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+            CHECK_XRCMD(OpenXrApi::xrGetSystem(GetXrInstance(), &systemInfo, &systemId));
+            XrSystemFoveatedRenderingPropertiesVARJO foveatedRenderingProperties{
+                XR_TYPE_SYSTEM_FOVEATED_RENDERING_PROPERTIES_VARJO};
+            XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES, &foveatedRenderingProperties};
+            CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(GetXrInstance(), systemId, &systemProperties));
+            TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
+            Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
+            Log(fmt::format("supportsFoveatedRendering = {}\n", foveatedRenderingProperties.supportsFoveatedRendering));
+
+            // See if there is anything we can do.
+            m_bypassApiLayer = !foveatedRenderingProperties.supportsFoveatedRendering;
+            if (m_bypassApiLayer) {
+                Log(fmt::format("{} layer will be bypassed\n", LayerName));
+                return XR_SUCCESS;
+            }
+
+            LoadConfiguration();
+
             return XR_SUCCESS;
         }
 
-        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetSystem
-        XrResult xrGetSystem(XrInstance instance, const XrSystemGetInfo* getInfo, XrSystemId* systemId) override {
-            if (getInfo->type != XR_TYPE_SYSTEM_GET_INFO) {
-                return XR_ERROR_VALIDATION_FAILURE;
-            }
-
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrEnumerateViewConfigurationViews
+        XrResult xrEnumerateViewConfigurationViews(XrInstance instance,
+                                                   XrSystemId systemId,
+                                                   XrViewConfigurationType viewConfigurationType,
+                                                   uint32_t viewCapacityInput,
+                                                   uint32_t* viewCountOutput,
+                                                   XrViewConfigurationView* views) override {
             TraceLoggingWrite(g_traceProvider,
-                              "xrGetSystem",
+                              "xrEnumerateViewConfigurationViews",
                               TLXArg(instance, "Instance"),
-                              TLArg(xr::ToCString(getInfo->formFactor), "FormFactor"));
+                              TLArg((int)systemId, "SystemId"),
+                              TLArg(viewCapacityInput, "ViewCapacityInput"),
+                              TLArg(xr::ToCString(viewConfigurationType), "ViewConfigurationType"));
 
-            const XrResult result = OpenXrApi::xrGetSystem(instance, getInfo, systemId);
-            if (XR_SUCCEEDED(result) && getInfo->formFactor == XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY) {
-                if (*systemId != m_systemId) {
-                    XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
-                    CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
-                    TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
-                    Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
+            // Insert the foveated configuration flag if needed.
+            std::vector<XrFoveatedViewConfigurationViewVARJO> foveatedView(
+                4, {XR_TYPE_FOVEATED_VIEW_CONFIGURATION_VIEW_VARJO});
+            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                    foveatedView[i].foveatedRenderingActive = XR_TRUE;
+                    foveatedView[i].next = views[i].next;
+                    views[i].next = &foveatedView[i];
                 }
-
-                // Remember the XrSystemId to use.
-                m_systemId = *systemId;
             }
 
-            TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg((int)*systemId, "SystemId"));
+            const XrResult result = OpenXrApi::xrEnumerateViewConfigurationViews(
+                instance, systemId, viewConfigurationType, viewCapacityInput, viewCountOutput, views);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(
+                    g_traceProvider, "xrEnumerateViewConfigurationViews", TLArg(*viewCountOutput, "ViewCountOutput"));
+
+                if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                        TraceLoggingWrite(
+                            g_traceProvider,
+                            "xrEnumerateViewConfigurationViews",
+                            TLArg(views[i].maxImageRectWidth, "MaxImageRectWidth"),
+                            TLArg(views[i].maxImageRectHeight, "MaxImageRectHeight"),
+                            TLArg(views[i].maxSwapchainSampleCount, "MaxSwapchainSampleCount"),
+                            TLArg(views[i].recommendedImageRectWidth, "RecommendedImageRectWidth"),
+                            TLArg(views[i].recommendedImageRectHeight, "RecommendedImageRectHeight"),
+                            TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
+                    }
+
+                    if (viewCapacityInput) {
+#pragma warning(push)
+#pragma warning(disable : 4244)
+                        views[0].recommendedImageRectWidth *= m_peripheralResolutionFactor;
+                        views[0].recommendedImageRectHeight *= m_peripheralResolutionFactor;
+                        views[1].recommendedImageRectWidth *= m_peripheralResolutionFactor;
+                        views[1].recommendedImageRectHeight *= m_peripheralResolutionFactor;
+                        views[2].recommendedImageRectWidth *= m_focusResolutionFactor;
+                        views[2].recommendedImageRectHeight *= m_focusResolutionFactor;
+                        views[3].recommendedImageRectWidth *= m_focusResolutionFactor;
+                        views[3].recommendedImageRectHeight *= m_focusResolutionFactor;
+#pragma warning(pop)
+
+                        Log(fmt::format("Peripheral resolution: {}x{} (multiplier: {:.3f})\n",
+                                        views[0].recommendedImageRectWidth,
+                                        views[0].recommendedImageRectHeight,
+                                        m_peripheralResolutionFactor));
+                        Log(fmt::format("Focus resolution {}x{} (multiplier: {:.3f})\n",
+                                        views[2].recommendedImageRectWidth,
+                                        views[2].recommendedImageRectHeight,
+                                        m_focusResolutionFactor));
+                    }
+                }
+            }
+
+            // Undo our changes to the app structs.
+            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                    views[i].next = foveatedView[i].next;
+                }
+            }
 
             return result;
         }
 
-        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateSession
-        XrResult xrCreateSession(XrInstance instance,
-                                 const XrSessionCreateInfo* createInfo,
-                                 XrSession* session) override {
-            if (createInfo->type != XR_TYPE_SESSION_CREATE_INFO) {
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateSwapchain
+        XrResult xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo* createInfo, XrSwapchain* swapchain) {
+            if (createInfo->type != XR_TYPE_SWAPCHAIN_CREATE_INFO) {
                 return XR_ERROR_VALIDATION_FAILURE;
             }
 
             TraceLoggingWrite(g_traceProvider,
-                              "xrCreateSession",
-                              TLXArg(instance, "Instance"),
-                              TLArg((int)createInfo->systemId, "SystemId"),
-                              TLArg(createInfo->createFlags, "CreateFlags"));
+                              "xrCreateSwapchain",
+                              TLXArg(session, "Session"),
+                              TLArg(createInfo->arraySize, "ArraySize"),
+                              TLArg(createInfo->width, "Width"),
+                              TLArg(createInfo->height, "Height"),
+                              TLArg(createInfo->createFlags, "CreateFlags"),
+                              TLArg(createInfo->format, "Format"),
+                              TLArg(createInfo->faceCount, "FaceCount"),
+                              TLArg(createInfo->mipCount, "MipCount"),
+                              TLArg(createInfo->sampleCount, "SampleCount"),
+                              TLArg(createInfo->usageFlags, "UsageFlags"));
+            Log(fmt::format("Creating swapchain with resolution: {}x{}\n", createInfo->width, createInfo->height));
 
-            const XrResult result = OpenXrApi::xrCreateSession(instance, createInfo, session);
-            if (XR_SUCCEEDED(result)) {
-                if (isSystemHandled(createInfo->systemId)) {
+            return OpenXrApi::xrCreateSwapchain(session, createInfo, swapchain);
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrBeginSession
+        XrResult xrBeginSession(XrSession session, const XrSessionBeginInfo* beginInfo) override {
+            if (beginInfo->type != XR_TYPE_SESSION_BEGIN_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(
+                g_traceProvider,
+                "xrBeginSession",
+                TLXArg(session, "Session"),
+                TLArg(xr::ToCString(beginInfo->primaryViewConfigurationType), "PrimaryViewConfigurationType"));
+
+            const XrResult result = OpenXrApi::xrBeginSession(session, beginInfo);
+
+            m_initialized = false;
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrLocateViews
+        XrResult xrLocateViews(XrSession session,
+                               const XrViewLocateInfo* viewLocateInfo,
+                               XrViewState* viewState,
+                               uint32_t viewCapacityInput,
+                               uint32_t* viewCountOutput,
+                               XrView* views) override {
+            if (viewLocateInfo->type != XR_TYPE_VIEW_LOCATE_INFO || viewState->type != XR_TYPE_VIEW_STATE) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrLocateViews",
+                              TLXArg(session, "Session"),
+                              TLArg(xr::ToCString(viewLocateInfo->viewConfigurationType), "ViewConfigurationType"),
+                              TLArg(viewLocateInfo->displayTime, "DisplayTime"),
+                              TLXArg(viewLocateInfo->space, "Space"),
+                              TLArg(viewCapacityInput, "ViewCapacityInput"));
+
+            // Insert the foveated location flag if needed.
+            XrViewLocateFoveatedRenderingVARJO viewLocateFoveatedRendering{
+                XR_TYPE_VIEW_LOCATE_FOVEATED_RENDERING_VARJO};
+            if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                {
+                    std::unique_lock lock(m_resourcesMutex);
+
+                    if (!m_initialized) {
+                        XrReferenceSpaceCreateInfo spaceInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                        spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                        spaceInfo.poseInReferenceSpace = xr::math::Pose::Identity();
+                        CHECK_XRCMD(xrCreateReferenceSpace(session, &spaceInfo, &m_viewSpace));
+
+                        spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO;
+                        spaceInfo.poseInReferenceSpace = xr::math::Pose::Identity();
+                        CHECK_XRCMD(xrCreateReferenceSpace(session, &spaceInfo, &m_renderGazeSpace));
+
+                        m_initialized = true;
+                    }
                 }
 
-                TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
+                XrSpaceLocation renderGazeLocation{XR_TYPE_SPACE_LOCATION};
+                CHECK_XRCMD(
+                    xrLocateSpace(m_renderGazeSpace, m_viewSpace, viewLocateInfo->displayTime, &renderGazeLocation));
+                const bool foveationActive =
+                    (renderGazeLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
+
+                viewLocateFoveatedRendering.foveatedRenderingActive = foveationActive;
+
+                TraceLoggingWrite(g_traceProvider, "xrLocateViews", TLArg(foveationActive, "FoveationActive"));
+
+                viewLocateFoveatedRendering.next = viewLocateInfo->next;
+                const_cast<XrViewLocateInfo*>(viewLocateInfo)->next = &viewLocateFoveatedRendering;
+            }
+
+            const XrResult result =
+                OpenXrApi::xrLocateViews(session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrLocateViews",
+                                  TLArg(*viewCountOutput, "ViewCountOutput"),
+                                  TLArg(viewState->viewStateFlags, "ViewStateFlags"));
+
+                for (uint32_t i = 0; i < *viewCountOutput; i++) {
+                    TraceLoggingWrite(g_traceProvider,
+                                      "xrLocateViews",
+                                      TLArg(xr::ToString(views[i].pose).c_str(), "Pose"),
+                                      TLArg(xr::ToString(views[i].fov).c_str(), "Fov"));
+                }
+            }
+
+            // Undo our changes to the app structs.
+            if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                const_cast<XrViewLocateInfo*>(viewLocateInfo)->next = viewLocateFoveatedRendering.next;
             }
 
             return result;
         }
 
       private:
-        bool isSystemHandled(XrSystemId systemId) const {
-            return systemId == m_systemId;
+        void LoadConfiguration() {
+            std::ifstream configFile;
+
+            // Look in %LocalAppData% first, then fallback to your installation folder.
+            configFile.open(localAppData / (LayerName + ".cfg"));
+            if (!configFile.is_open()) {
+                configFile.open(dllHome / (LayerName + ".cfg"));
+            }
+
+            if (configFile.is_open()) {
+                unsigned int lineNumber = 0;
+                std::string line;
+                while (std::getline(configFile, line)) {
+                    lineNumber++;
+                    ParseConfigurationStatement(line, lineNumber);
+                }
+                configFile.close();
+            } else {
+                Log("No configuration was found\n");
+            }
+        }
+
+        void ParseConfigurationStatement(const std::string& line, unsigned int lineNumber) {
+            try {
+                const auto offset = line.find('=');
+                if (offset != std::string::npos) {
+                    const std::string name = line.substr(0, offset);
+                    const std::string value = line.substr(offset + 1);
+
+                    if (name == "peripheral_multiplier") {
+                        m_peripheralResolutionFactor = std::stof(value);
+                    } else if (name == "focus_multiplier") {
+                        m_focusResolutionFactor = std::stof(value);
+                    } else if (name == "no_eye_tracking") {
+                        m_noEyeTracking = std::stoi(value);
+                    } else {
+                        Log("L%u: Unrecognized option\n", lineNumber);
+                    }
+                } else {
+                    Log("L%u: Improperly formatted option\n", lineNumber);
+                }
+            } catch (...) {
+                Log("L%u: Parsing error\n", lineNumber);
+            }
         }
 
         bool m_bypassApiLayer{false};
-        XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
+
+        bool m_noEyeTracking{false};
+        float m_peripheralResolutionFactor{1.f};
+        float m_focusResolutionFactor{1.f};
+
+        std::mutex m_resourcesMutex;
+        bool m_initialized{false};
+        XrSpace m_viewSpace{XR_NULL_HANDLE};
+        XrSpace m_renderGazeSpace{XR_NULL_HANDLE};
     };
 
     std::unique_ptr<OpenXrLayer> g_instance = nullptr;

@@ -63,6 +63,8 @@ namespace openxr_api_layer {
         std::vector<std::string> blockedExtensions;
         std::vector<std::string> implicitExtensions;
 
+        implicitExtensions.push_back(XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME);
+
         // Only request implicit extensions that are supported.
         //
         // While the OpenXR standard states that xrEnumerateInstanceExtensionProperties() can be queried without an
@@ -119,7 +121,10 @@ namespace openxr_api_layer {
         std::vector<const char*> newEnabledExtensionNames;
         for (uint32_t i = 0; i < chainInstanceCreateInfo.enabledExtensionCount; i++) {
             const std::string_view ext(chainInstanceCreateInfo.enabledExtensionNames[i]);
-            TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance", TLArg(ext.data(), "ExtensionName"));
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateApiLayerInstance",
+                              TLArg(ext.data(), "ExtensionName"),
+                              TLArg("App", "Request"));
 
             if (std::find(blockedExtensions.cbegin(), blockedExtensions.cend(), ext) == blockedExtensions.cend()) {
                 Log(fmt::format("Requested extension: {}\n", ext));
@@ -129,6 +134,10 @@ namespace openxr_api_layer {
             }
         }
         for (const auto& ext : implicitExtensions) {
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateApiLayerInstance",
+                              TLArg(ext.c_str(), "ExtensionName"),
+                              TLArg("Implicit", "Request"));
             Log(fmt::format("Requesting extension: {}\n", ext));
             newEnabledExtensionNames.push_back(ext.c_str());
         }

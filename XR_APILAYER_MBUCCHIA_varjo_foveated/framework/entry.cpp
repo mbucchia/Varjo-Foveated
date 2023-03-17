@@ -28,10 +28,7 @@
 #include "log.h"
 
 namespace openxr_api_layer {
-    // The path where the DLL is loaded from (eg: to load data files).
     std::filesystem::path dllHome;
-
-    // The path that is writable (eg: to store logs).
     std::filesystem::path localAppData;
 
     namespace log {
