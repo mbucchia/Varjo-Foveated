@@ -26,7 +26,7 @@
 
 namespace openxr_api_layer {
 
-    const std::string LayerName = "XR_APILAYER_NOVENDOR_template";
+    const std::string LayerName = "XR_APILAYER_MBUCCHIA_varjo_foveated";
     const std::string VersionString = "Unreleased (0.0.0)";
 
     // Singleton accessor.
