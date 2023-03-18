@@ -145,18 +145,6 @@ namespace {
                     g_traceProvider, "xrEnumerateViewConfigurationViews", TLArg(*viewCountOutput, "ViewCountOutput"));
 
                 if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                    for (uint32_t i = 0; i < viewCapacityInput; i++) {
-                        TraceLoggingWrite(
-                            g_traceProvider,
-                            "xrEnumerateViewConfigurationViews",
-                            TLArg(views[i].maxImageRectWidth, "MaxImageRectWidth"),
-                            TLArg(views[i].maxImageRectHeight, "MaxImageRectHeight"),
-                            TLArg(views[i].maxSwapchainSampleCount, "MaxSwapchainSampleCount"),
-                            TLArg(views[i].recommendedImageRectWidth, "RecommendedImageRectWidth"),
-                            TLArg(views[i].recommendedImageRectHeight, "RecommendedImageRectHeight"),
-                            TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
-                    }
-
                     if (viewCapacityInput) {
 #pragma warning(push)
 #pragma warning(disable : 4244)
@@ -178,6 +166,24 @@ namespace {
                                         views[2].recommendedImageRectWidth,
                                         views[2].recommendedImageRectHeight,
                                         m_focusResolutionFactor));
+                    }
+
+                    for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                        // Propagate the maximum.
+                        views[i].maxImageRectWidth =
+                            std::max(views[i].maxImageRectWidth, views[i].recommendedImageRectWidth);
+                        views[i].maxImageRectHeight =
+                            std::max(views[i].maxImageRectHeight, views[i].recommendedImageRectHeight);
+
+                        TraceLoggingWrite(
+                            g_traceProvider,
+                            "xrEnumerateViewConfigurationViews",
+                            TLArg(views[i].maxImageRectWidth, "MaxImageRectWidth"),
+                            TLArg(views[i].maxImageRectHeight, "MaxImageRectHeight"),
+                            TLArg(views[i].maxSwapchainSampleCount, "MaxSwapchainSampleCount"),
+                            TLArg(views[i].recommendedImageRectWidth, "RecommendedImageRectWidth"),
+                            TLArg(views[i].recommendedImageRectHeight, "RecommendedImageRectHeight"),
+                            TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
                     }
                 }
             }
