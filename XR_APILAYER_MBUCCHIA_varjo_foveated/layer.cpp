@@ -103,7 +103,11 @@ namespace {
                 XR_TYPE_SYSTEM_FOVEATED_RENDERING_PROPERTIES_VARJO};
             XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES, &foveatedRenderingProperties};
             CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(GetXrInstance(), systemId, &systemProperties));
-            TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
+            TraceLoggingWrite(
+                g_traceProvider,
+                "xrGetSystem",
+                TLArg(systemProperties.systemName, "SystemName"),
+                TLArg(foveatedRenderingProperties.supportsFoveatedRendering, "SupportsFoveatedRendering"));
             Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
             Log(fmt::format("supportsFoveatedRendering = {}\n", foveatedRenderingProperties.supportsFoveatedRendering));
 
@@ -218,7 +222,13 @@ namespace {
                               TLArg(createInfo->usageFlags, "UsageFlags"));
             Log(fmt::format("Creating swapchain with resolution: {}x{}\n", createInfo->width, createInfo->height));
 
-            return OpenXrApi::xrCreateSwapchain(session, createInfo, swapchain);
+            const XrResult result = OpenXrApi::xrCreateSwapchain(session, createInfo, swapchain);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider, "xrCreateSwapchain", TLXArg(*swapchain, "Swapchain"));
+            }
+
+            return result;
         }
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrBeginSession
@@ -320,6 +330,115 @@ namespace {
             }
 
             return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrAcquireSwapchainImage
+        XrResult xrAcquireSwapchainImage(XrSwapchain swapchain,
+                                         const XrSwapchainImageAcquireInfo* acquireInfo,
+                                         uint32_t* index) override {
+            TraceLoggingWrite(g_traceProvider, "xrAcquireSwapchainImage", TLXArg(swapchain, "Swapchain"));
+
+            const XrResult result = OpenXrApi::xrAcquireSwapchainImage(swapchain, acquireInfo, index);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider, "xrAcquireSwapchainImage", TLArg(*index, "Index"));
+            }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrWaitSwapchainImage
+        XrResult xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo* waitInfo) override {
+            if (waitInfo->type != XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrWaitSwapchainImage",
+                              TLXArg(swapchain, "Swapchain"),
+                              TLArg(waitInfo->timeout, "Timeout"));
+
+            return OpenXrApi::xrWaitSwapchainImage(swapchain, waitInfo);
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrReleaseSwapchainImage
+        XrResult xrReleaseSwapchainImage(XrSwapchain swapchain,
+                                         const XrSwapchainImageReleaseInfo* releaseInfo) override {
+            TraceLoggingWrite(g_traceProvider, "xrReleaseSwapchainImage", TLXArg(swapchain, "Swapchain"));
+
+            return OpenXrApi::xrReleaseSwapchainImage(swapchain, releaseInfo);
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrWaitFrame
+        XrResult xrWaitFrame(XrSession session,
+                             const XrFrameWaitInfo* frameWaitInfo,
+                             XrFrameState* frameState) override {
+            TraceLoggingWrite(g_traceProvider, "xrWaitFrame", TLXArg(session, "Session"));
+
+            const XrResult result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrWaitFrame",
+                                  TLArg(!!frameState->shouldRender, "ShouldRender"),
+                                  TLArg(frameState->predictedDisplayTime, "PredictedDisplayTime"),
+                                  TLArg(frameState->predictedDisplayPeriod, "PredictedDisplayPeriod"));
+            }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrBeginFrame
+        XrResult xrBeginFrame(XrSession session, const XrFrameBeginInfo* frameBeginInfo) override {
+            TraceLoggingWrite(g_traceProvider, "xrBeginFrame", TLXArg(session, "Session"));
+
+            return OpenXrApi::xrBeginFrame(session, frameBeginInfo);
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrEndFrame
+        XrResult xrEndFrame(XrSession session, const XrFrameEndInfo* frameEndInfo) override {
+            if (frameEndInfo->type != XR_TYPE_FRAME_END_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrEndFrame",
+                              TLXArg(session, "Session"),
+                              TLArg(frameEndInfo->displayTime, "DisplayTime"),
+                              TLArg(xr::ToCString(frameEndInfo->environmentBlendMode), "EnvironmentBlendMode"),
+                              TLArg(frameEndInfo->layerCount, "LayerCount"));
+
+            for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
+                if (!frameEndInfo->layers[i]) {
+                    return XR_ERROR_LAYER_INVALID;
+                }
+
+                if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
+                    const XrCompositionLayerProjection* proj =
+                        reinterpret_cast<const XrCompositionLayerProjection*>(frameEndInfo->layers[i]);
+
+                    TraceLoggingWrite(g_traceProvider,
+                                      "xrEndFrame_Layer",
+                                      TLArg("Projection", "Type"),
+                                      TLArg(proj->layerFlags, "Flags"),
+                                      TLXArg(proj->space, "Space"),
+                                      TLArg(proj->viewCount, "ViewCount"));
+
+                    for (uint32_t eye = 0; eye < proj->viewCount; eye++) {
+                        TraceLoggingWrite(g_traceProvider,
+                                          "xrEndFrame_View",
+                                          TLArg("Projection", "Type"),
+                                          TLArg(eye, "Index"),
+                                          TLXArg(proj->views[eye].subImage.swapchain, "Swapchain"),
+                                          TLArg(proj->views[eye].subImage.imageArrayIndex, "ImageArrayIndex"),
+                                          TLArg(xr::ToString(proj->views[eye].subImage.imageRect).c_str(), "ImageRect"),
+                                          TLArg(xr::ToString(proj->views[eye].pose).c_str(), "Pose"),
+                                          TLArg(xr::ToString(proj->views[eye].fov).c_str(), "Fov"));
+                    }
+                }
+            }
+
+            return OpenXrApi::xrEndFrame(session, frameEndInfo);
         }
 
       private:
