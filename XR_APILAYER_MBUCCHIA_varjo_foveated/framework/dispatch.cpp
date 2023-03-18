@@ -59,11 +59,38 @@ namespace openxr_api_layer {
             }
         }
 
-        // The list of extensions to remove or implicitly add.
+        // The list of extensions to block.
         std::vector<std::string> blockedExtensions;
-        std::vector<std::string> implicitExtensions;
 
-        implicitExtensions.push_back(XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME);
+        // Dump the extensions requested by the app.
+        std::vector<std::string> newEnabledExtensions;
+        std::vector<const char*> newEnabledExtensionNames;
+        bool hasVarjoQuad = false;
+        for (uint32_t i = 0; i < instanceCreateInfo->enabledExtensionCount; i++) {
+            const std::string_view ext(instanceCreateInfo->enabledExtensionNames[i]);
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateApiLayerInstance",
+                              TLArg(ext.data(), "ExtensionName"),
+                              TLArg("App", "Request"));
+
+            if (std::find(blockedExtensions.cbegin(), blockedExtensions.cend(), ext) == blockedExtensions.cend()) {
+                Log(fmt::format("Requested extension: {}\n", ext));
+                newEnabledExtensions.push_back(ext.data());
+                newEnabledExtensionNames.push_back(ext.data());
+            } else {
+                Log(fmt::format("Blocking extension: {}\n", ext));
+            }
+
+            if (ext == XR_VARJO_QUAD_VIEWS_EXTENSION_NAME) {
+                hasVarjoQuad = true;
+            }
+        }
+
+        // The list of extensions to implicitly add.
+        std::vector<std::string> implicitExtensions;
+        if (hasVarjoQuad) {
+            implicitExtensions.push_back(XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME);
+        }
 
         // Only request implicit extensions that are supported.
         //
@@ -116,23 +143,7 @@ namespace openxr_api_layer {
             CHECK_XRCMD(xrDestroyInstance(dummyInstance));
         }
 
-        // Dump the requested extensions.
-        XrInstanceCreateInfo chainInstanceCreateInfo = *instanceCreateInfo;
-        std::vector<const char*> newEnabledExtensionNames;
-        for (uint32_t i = 0; i < chainInstanceCreateInfo.enabledExtensionCount; i++) {
-            const std::string_view ext(chainInstanceCreateInfo.enabledExtensionNames[i]);
-            TraceLoggingWrite(g_traceProvider,
-                              "xrCreateApiLayerInstance",
-                              TLArg(ext.data(), "ExtensionName"),
-                              TLArg("App", "Request"));
-
-            if (std::find(blockedExtensions.cbegin(), blockedExtensions.cend(), ext) == blockedExtensions.cend()) {
-                Log(fmt::format("Requested extension: {}\n", ext));
-                newEnabledExtensionNames.push_back(ext.data());
-            } else {
-                Log(fmt::format("Blocking extension: {}\n", ext));
-            }
-        }
+        // Dump the extensions requested by the layer.
         for (const auto& ext : implicitExtensions) {
             TraceLoggingWrite(g_traceProvider,
                               "xrCreateApiLayerInstance",
@@ -140,7 +151,10 @@ namespace openxr_api_layer {
                               TLArg("Implicit", "Request"));
             Log(fmt::format("Requesting extension: {}\n", ext));
             newEnabledExtensionNames.push_back(ext.c_str());
+            newEnabledExtensions.push_back(ext);
         }
+
+        XrInstanceCreateInfo chainInstanceCreateInfo = *instanceCreateInfo;
         chainInstanceCreateInfo.enabledExtensionNames = newEnabledExtensionNames.data();
         chainInstanceCreateInfo.enabledExtensionCount = (uint32_t)newEnabledExtensionNames.size();
 
@@ -153,7 +167,7 @@ namespace openxr_api_layer {
             // Create our layer.
             openxr_api_layer::GetInstance()->SetGetInstanceProcAddr(apiLayerInfo->nextInfo->nextGetInstanceProcAddr,
                                                                     *instance);
-            openxr_api_layer::GetInstance()->SetGrantedExtensions(implicitExtensions);
+            openxr_api_layer::GetInstance()->SetGrantedExtensions(newEnabledExtensions);
 
             // Forward the xrCreateInstance() call to the layer.
             try {
