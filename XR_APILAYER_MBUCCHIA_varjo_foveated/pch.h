@@ -34,6 +34,8 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <chrono>
+#include <future>
 
 using namespace std::chrono_literals;
 

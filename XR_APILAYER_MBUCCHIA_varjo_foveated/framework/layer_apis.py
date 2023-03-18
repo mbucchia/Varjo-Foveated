@@ -2,7 +2,9 @@
 override_functions = [
     "xrEnumerateViewConfigurationViews",
     "xrCreateSwapchain",
+    "xrDestroySwapchain",
     "xrBeginSession",
+    "xrDestroySession",
     "xrLocateViews",
     "xrWaitFrame",
     "xrBeginFrame",
