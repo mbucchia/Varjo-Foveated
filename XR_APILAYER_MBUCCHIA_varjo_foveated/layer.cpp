@@ -262,7 +262,7 @@ namespace {
 
             // In Turbo Mode, make sure there is no pending frame that may potentially hold onto the swapchain.
             {
-                std::unique_lock lock(m_frameLock);
+                std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
                     TraceLocalActivity(local);
@@ -385,6 +385,16 @@ namespace {
                                       TLArg(xr::ToString(views[i].pose).c_str(), "Pose"),
                                       TLArg(xr::ToString(views[i].fov).c_str(), "Fov"));
                 }
+
+                if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    std::unique_lock lock(m_focusFovMutex);
+
+                    m_focusFovForDisplayTime.insert_or_assign(viewLocateInfo->displayTime,
+                                                              std::make_pair(views[2].fov, views[3].fov));
+                    TraceLoggingWrite(g_traceProvider,
+                                      "xrLocateViews",
+                                      TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                }
             }
 
             // Undo our changes to the app structs.
@@ -443,7 +453,7 @@ namespace {
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             {
-                std::unique_lock lock(m_frameLock);
+                std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
                     TraceLoggingWrite(g_traceProvider, "AsyncWaitMode");
@@ -461,7 +471,7 @@ namespace {
 
                     // In Turbo mode, we don't actually wait, we make up a predicted time.
                     {
-                        std::unique_lock lock(m_asyncWaitLock);
+                        std::unique_lock lock(m_asyncWaitMutex);
 
                         frameState->predictedDisplayTime =
                             m_asyncWaitCompleted ? m_lastPredictedDisplayTime
@@ -509,7 +519,7 @@ namespace {
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             {
-                std::unique_lock lock(m_frameLock);
+                std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
                     // In turbo mode, we do nothing here.
@@ -553,6 +563,15 @@ namespace {
                                       TLArg(proj->viewCount, "ViewCount"));
 
                     for (uint32_t eye = 0; eye < proj->viewCount; eye++) {
+                        XrFovf originalFov = proj->views[eye].fov;
+
+                        // Patch the FOV for the focus views if possible.
+                        const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
+                        if (cit != m_focusFovForDisplayTime.cend() && (eye == 2 || eye == 3)) {
+                            ((XrCompositionLayerProjectionView*)proj->views)[eye].fov =
+                                eye == 2 ? cit->second.first : cit->second.second;
+                        }
+
                         TraceLoggingWrite(g_traceProvider,
                                           "xrEndFrame_View",
                                           TLArg("Projection", "Type"),
@@ -561,14 +580,15 @@ namespace {
                                           TLArg(proj->views[eye].subImage.imageArrayIndex, "ImageArrayIndex"),
                                           TLArg(xr::ToString(proj->views[eye].subImage.imageRect).c_str(), "ImageRect"),
                                           TLArg(xr::ToString(proj->views[eye].pose).c_str(), "Pose"),
-                                          TLArg(xr::ToString(proj->views[eye].fov).c_str(), "Fov"));
+                                          TLArg(xr::ToString(proj->views[eye].fov).c_str(), "Fov"),
+                                          TLArg(xr::ToString(originalFov).c_str(), "UnpatchedFov"));
                     }
                 }
             }
 
             XrResult result;
             {
-                std::unique_lock lock(m_frameLock);
+                std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
                     TraceLocalActivity(local);
@@ -608,7 +628,7 @@ namespace {
                                               TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
                                               TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
                         {
-                            std::unique_lock lock(m_asyncWaitLock);
+                            std::unique_lock lock(m_asyncWaitMutex);
 
                             m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
                             m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
@@ -617,6 +637,19 @@ namespace {
                         }
                     });
                 }
+            }
+
+            {
+                std::unique_lock lock(m_focusFovMutex);
+
+                // Delete all entries older than 1s.
+                while (!m_focusFovForDisplayTime.empty() &&
+                       m_focusFovForDisplayTime.cbegin()->first < frameEndInfo->displayTime - 1'000'000'000) {
+                    m_focusFovForDisplayTime.erase(m_focusFovForDisplayTime.begin());
+                }
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrEndFrame",
+                                  TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
             }
 
             return result;
@@ -685,11 +718,15 @@ namespace {
         XrSpace m_viewSpace{XR_NULL_HANDLE};
         XrSpace m_renderGazeSpace{XR_NULL_HANDLE};
 
+        // FOV submission correction.
+        std::mutex m_focusFovMutex;
+        std::map<XrTime, std::pair<XrFovf, XrFovf>> m_focusFovForDisplayTime;
+
         // Turbo mode.
         std::chrono::time_point<std::chrono::steady_clock> m_lastFrameWaitTimestamp{};
-        std::mutex m_frameLock;
+        std::mutex m_frameMutex;
         XrTime m_waitedFrameTime;
-        std::mutex m_asyncWaitLock;
+        std::mutex m_asyncWaitMutex;
         std::future<void> m_asyncWaitPromise;
         XrTime m_lastPredictedDisplayTime{0};
         XrTime m_lastPredictedDisplayPeriod{0};

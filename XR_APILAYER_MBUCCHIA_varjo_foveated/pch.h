@@ -36,6 +36,8 @@
 #include <mutex>
 #include <chrono>
 #include <future>
+#include <vector>
+#include <map>
 
 using namespace std::chrono_literals;
 
