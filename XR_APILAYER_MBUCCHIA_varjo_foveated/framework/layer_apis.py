@@ -20,6 +20,7 @@ requested_functions = [
     "xrGetInstanceProperties",
     "xrGetSystem",
     "xrGetSystemProperties",
+    "xrGetViewConfigurationProperties",
     "xrCreateReferenceSpace",
     "xrLocateSpace"
 ]

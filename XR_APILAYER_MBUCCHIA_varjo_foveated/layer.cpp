@@ -71,6 +71,7 @@ namespace {
                               TLArg(createInfo->createFlags, "CreateFlags"));
             Log(fmt::format("Application: {}\n", createInfo->applicationInfo.applicationName));
 
+#ifndef _DEBUG
             // See if the instance supports quad views to begin with.
             m_bypassApiLayer = std::find(GetGrantedExtensions().cbegin(),
                                          GetGrantedExtensions().cend(),
@@ -79,6 +80,7 @@ namespace {
                 Log(fmt::format("{} layer will be bypassed\n", LayerName));
                 return XR_SUCCESS;
             }
+#endif
 
             // Needed to resolve the requested function pointers.
             OpenXrApi::xrCreateInstance(createInfo);
@@ -105,13 +107,25 @@ namespace {
             CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(GetXrInstance(), systemId, &systemProperties));
             TraceLoggingWrite(
                 g_traceProvider,
-                "xrGetSystem",
+                "xrCreateInstance",
                 TLArg(systemProperties.systemName, "SystemName"),
                 TLArg(foveatedRenderingProperties.supportsFoveatedRendering, "SupportsFoveatedRendering"));
             Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
             Log(fmt::format("supportsFoveatedRendering = {}\n", foveatedRenderingProperties.supportsFoveatedRendering));
 
             LoadConfiguration();
+
+            // Force foveation off if not supported.
+            if (!foveatedRenderingProperties.supportsFoveatedRendering) {
+                m_noEyeTracking = true;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateInstance",
+                              TLArg(m_peripheralResolutionFactor, "PeripheralResolutionFactor"),
+                              TLArg(m_focusResolutionFactor, "FocusResolutionFactor"),
+                              TLArg(m_noEyeTracking, "NoEyeTracking"),
+                              TLArg(m_useTurboMode, "TurboMode"));
 
             return XR_SUCCESS;
         }
@@ -134,6 +148,9 @@ namespace {
             std::vector<XrFoveatedViewConfigurationViewVARJO> foveatedView(
                 4, {XR_TYPE_FOVEATED_VIEW_CONFIGURATION_VIEW_VARJO});
             if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrEnumerateViewConfigurationViews",
+                                  TLArg(!m_noEyeTracking, "FoveatedRenderingActive"));
                 for (uint32_t i = 0; i < viewCapacityInput; i++) {
                     foveatedView[i].foveatedRenderingActive = !m_noEyeTracking;
                     foveatedView[i].next = views[i].next;
@@ -190,6 +207,14 @@ namespace {
                             TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
                     }
                 }
+
+                // Useful to log fovMutable as well.
+                XrViewConfigurationProperties viewConfigurationProperties{XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
+                CHECK_XRCMD(OpenXrApi::xrGetViewConfigurationProperties(
+                    instance, systemId, viewConfigurationType, &viewConfigurationProperties));
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrEnumerateViewConfigurationViews",
+                                  TLArg(!!viewConfigurationProperties.fovMutable, "FovMutable"));
             }
 
             // Undo our changes to the app structs.
@@ -320,18 +345,18 @@ namespace {
                             XrReferenceSpaceCreateInfo spaceInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
                             spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
                             spaceInfo.poseInReferenceSpace = xr::math::Pose::Identity();
-                            CHECK_XRCMD(xrCreateReferenceSpace(session, &spaceInfo, &m_viewSpace));
+                            CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceInfo, &m_viewSpace));
 
                             spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO;
                             spaceInfo.poseInReferenceSpace = xr::math::Pose::Identity();
-                            CHECK_XRCMD(xrCreateReferenceSpace(session, &spaceInfo, &m_renderGazeSpace));
+                            CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceInfo, &m_renderGazeSpace));
 
                             m_initialized = true;
                         }
                     }
 
                     XrSpaceLocation renderGazeLocation{XR_TYPE_SPACE_LOCATION};
-                    CHECK_XRCMD(xrLocateSpace(
+                    CHECK_XRCMD(OpenXrApi::xrLocateSpace(
                         m_renderGazeSpace, m_viewSpace, viewLocateInfo->displayTime, &renderGazeLocation));
                     foveationActive =
                         (renderGazeLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
