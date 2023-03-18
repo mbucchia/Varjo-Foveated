@@ -61,10 +61,12 @@ XrResult __declspec(dllexport) XRAPI_CALL
         }
     }
 
+    localAppData = std::filesystem::path(getenv("LOCALAPPDATA")) / "Varjo-Foveated";
+    CreateDirectoryA(localAppData.string().c_str(), nullptr);
+
     // Start logging to file.
     if (!logStream.is_open()) {
-        std::string logFile = (std::filesystem::path(getenv("LOCALAPPDATA")) / (LayerName + ".log")).string();
-        logStream.open(logFile, std::ios_base::ate);
+        logStream.open(localAppData / "varjo-foveated.log", std::ios_base::ate);
     }
 
     DebugLog("--> xrNegotiateLoaderApiLayerInterface\n");

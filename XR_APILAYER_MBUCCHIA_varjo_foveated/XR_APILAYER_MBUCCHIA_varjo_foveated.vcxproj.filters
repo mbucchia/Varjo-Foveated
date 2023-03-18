@@ -63,6 +63,6 @@
     </None>
     <None Include="packages.config" />
     <None Include="module.def" />
-    <None Include="..\XR_APILAYER_MBUCCHIA_varjo_foveated.cfg" />
+    <None Include="..\settings.cfg" />
   </ItemGroup>
 </Project>

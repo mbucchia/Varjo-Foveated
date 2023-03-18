@@ -660,9 +660,14 @@ namespace {
             std::ifstream configFile;
 
             // Look in %LocalAppData% first, then fallback to your installation folder.
-            configFile.open(localAppData / (LayerName + ".cfg"));
+            auto configPath = localAppData / "settings.cfg";
+            Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
+            configFile.open(configPath);
             if (!configFile.is_open()) {
-                configFile.open(dllHome / (LayerName + ".cfg"));
+                Log("Not found\n");
+                configPath = dllHome / "settings.cfg";
+                Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
+                configFile.open(configPath);
             }
 
             if (configFile.is_open()) {
@@ -685,16 +690,25 @@ namespace {
                     const std::string name = line.substr(0, offset);
                     const std::string value = line.substr(offset + 1);
 
+                    bool parsed = false;
                     if (name == "peripheral_multiplier") {
                         m_peripheralResolutionFactor = std::stof(value);
+                        parsed = true;
                     } else if (name == "focus_multiplier") {
                         m_focusResolutionFactor = std::stof(value);
+                        parsed = true;
                     } else if (name == "no_eye_tracking") {
                         m_noEyeTracking = std::stoi(value);
+                        parsed = true;
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
+                        parsed = true;
                     } else {
                         Log("L%u: Unrecognized option\n", lineNumber);
+                    }
+
+                    if (parsed) {
+                        Log(fmt::format("  Found option '{}={}'\n", name, value));
                     }
                 } else {
                     Log("L%u: Improperly formatted option\n", lineNumber);
@@ -710,7 +724,7 @@ namespace {
         bool m_noEyeTracking{false};
         float m_peripheralResolutionFactor{1.f};
         float m_focusResolutionFactor{1.f};
-        bool m_useTurboMode{false};
+        bool m_useTurboMode{true};
 
         // Foveated mode.
         std::mutex m_resourcesMutex;
