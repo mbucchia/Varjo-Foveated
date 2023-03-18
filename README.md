@@ -2,7 +2,7 @@
 
 In layperson's terms:
 
-This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Varjo headset in Digital Combat Simulation (DCS) World when using the latest OpenBeta with native OpenXR support. It works with both the single-threaded and multi-threaded mode of the game.
+This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Varjo headset in Digital Combat Simulation (DCS) World when using the latest OpenBeta with native OpenXR support.
 
 In technical terms:
 
