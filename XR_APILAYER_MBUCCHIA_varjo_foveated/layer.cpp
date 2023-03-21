@@ -113,6 +113,7 @@ namespace {
             Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
             Log(fmt::format("supportsFoveatedRendering = {}\n", foveatedRenderingProperties.supportsFoveatedRendering));
 
+            // Parse the configuration.
             LoadConfiguration();
 
             // Force foveation off if not supported.
@@ -124,6 +125,8 @@ namespace {
                               "xrCreateInstance",
                               TLArg(m_peripheralResolutionFactor, "PeripheralResolutionFactor"),
                               TLArg(m_focusResolutionFactor, "FocusResolutionFactor"),
+                              TLArg(m_focusHorizontalScale, "FocusHorizontalScale"),
+                              TLArg(m_focusVerticalScale, "FocusVerticalScale"),
                               TLArg(m_noEyeTracking, "NoEyeTracking"),
                               TLArg(m_useTurboMode, "TurboMode"));
 
@@ -167,26 +170,28 @@ namespace {
 
                 if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                     if (viewCapacityInput) {
+                        // Apply resolution scaling.
 #pragma warning(push)
 #pragma warning(disable : 4244)
                         views[0].recommendedImageRectWidth *= m_peripheralResolutionFactor;
                         views[0].recommendedImageRectHeight *= m_peripheralResolutionFactor;
                         views[1].recommendedImageRectWidth *= m_peripheralResolutionFactor;
                         views[1].recommendedImageRectHeight *= m_peripheralResolutionFactor;
-                        views[2].recommendedImageRectWidth *= m_focusResolutionFactor;
-                        views[2].recommendedImageRectHeight *= m_focusResolutionFactor;
-                        views[3].recommendedImageRectWidth *= m_focusResolutionFactor;
-                        views[3].recommendedImageRectHeight *= m_focusResolutionFactor;
+                        views[2].recommendedImageRectWidth *= m_focusResolutionFactor * m_focusHorizontalScale;
+                        views[2].recommendedImageRectHeight *= m_focusResolutionFactor * m_focusVerticalScale;
+                        views[3].recommendedImageRectWidth *= m_focusResolutionFactor * m_focusHorizontalScale;
+                        views[3].recommendedImageRectHeight *= m_focusResolutionFactor * m_focusVerticalScale;
 #pragma warning(pop)
 
                         Log(fmt::format("Peripheral resolution: {}x{} (multiplier: {:.3f})\n",
                                         views[0].recommendedImageRectWidth,
                                         views[0].recommendedImageRectHeight,
                                         m_peripheralResolutionFactor));
-                        Log(fmt::format("Focus resolution {}x{} (multiplier: {:.3f})\n",
+                        Log(fmt::format("Focus resolution {}x{} (multiplier: {:.3f}/{:.3f})\n",
                                         views[2].recommendedImageRectWidth,
                                         views[2].recommendedImageRectHeight,
-                                        m_focusResolutionFactor));
+                                        m_focusResolutionFactor * m_focusHorizontalScale,
+                                        m_focusResolutionFactor * m_focusVerticalScale));
                     }
 
                     for (uint32_t i = 0; i < viewCapacityInput; i++) {
@@ -387,6 +392,25 @@ namespace {
                 }
 
                 if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    // Apply focus region scaling.
+                    const auto scaleFov = [](float angleLower, float angleUpper, float scale) {
+                        const float angleCenter = (angleLower + angleUpper) / 2;
+                        const float angleSpread = angleUpper - angleLower;
+                        const float angleSpreadScaled = angleSpread * scale;
+                        const float angleLowerScaled = angleCenter - (angleSpreadScaled / 2);
+                        const float angleUpperScaled = angleCenter + (angleSpreadScaled / 2);
+
+                        return std::make_pair(angleLowerScaled, angleUpperScaled);
+                    };
+                    std::tie(views[2].fov.angleDown, views[2].fov.angleUp) =
+                        scaleFov(views[2].fov.angleDown, views[2].fov.angleUp, m_focusVerticalScale);
+                    std::tie(views[2].fov.angleLeft, views[2].fov.angleRight) =
+                        scaleFov(views[2].fov.angleLeft, views[2].fov.angleRight, m_focusHorizontalScale);
+                    std::tie(views[3].fov.angleDown, views[3].fov.angleUp) =
+                        scaleFov(views[3].fov.angleDown, views[3].fov.angleUp, m_focusVerticalScale);
+                    std::tie(views[3].fov.angleLeft, views[3].fov.angleRight) =
+                        scaleFov(views[3].fov.angleLeft, views[3].fov.angleRight, m_focusHorizontalScale);
+
                     std::unique_lock lock(m_focusFovMutex);
 
                     m_focusFovForDisplayTime.insert_or_assign(viewLocateInfo->displayTime,
@@ -697,6 +721,12 @@ namespace {
                     } else if (name == "focus_multiplier") {
                         m_focusResolutionFactor = std::stof(value);
                         parsed = true;
+                    } else if (name == "horizontal_focus_scale") {
+                        m_focusHorizontalScale = std::stof(value);
+                        parsed = true;
+                    } else if (name == "vertical_focus_scale") {
+                        m_focusVerticalScale = std::stof(value);
+                        parsed = true;
                     } else if (name == "no_eye_tracking") {
                         m_noEyeTracking = std::stoi(value);
                         parsed = true;
@@ -724,6 +754,8 @@ namespace {
         bool m_noEyeTracking{false};
         float m_peripheralResolutionFactor{1.f};
         float m_focusResolutionFactor{1.f};
+        float m_focusHorizontalScale{1.f};
+        float m_focusVerticalScale{1.f};
         bool m_useTurboMode{true};
 
         // Foveated mode.
