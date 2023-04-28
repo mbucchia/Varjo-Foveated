@@ -27,7 +27,7 @@
 namespace openxr_api_layer {
 
     const std::string LayerName = "XR_APILAYER_MBUCCHIA_varjo_foveated";
-    const std::string VersionString = "v0.1.0";
+    const std::string VersionString = "v0.2.0";
 
     // The path where the DLL is loaded from (eg: to load data files).
     extern std::filesystem::path dllHome;
