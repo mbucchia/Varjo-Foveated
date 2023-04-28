@@ -154,7 +154,7 @@ namespace {
                 TraceLoggingWrite(g_traceProvider,
                                   "xrEnumerateViewConfigurationViews",
                                   TLArg(!m_noEyeTracking, "FoveatedRenderingActive"));
-                for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                for (uint32_t i = 0; i < std::min((uint32_t)foveatedView.size(), viewCapacityInput); i++) {
                     foveatedView[i].foveatedRenderingActive = !m_noEyeTracking;
                     foveatedView[i].next = views[i].next;
                     views[i].next = &foveatedView[i];
@@ -168,8 +168,8 @@ namespace {
                 TraceLoggingWrite(
                     g_traceProvider, "xrEnumerateViewConfigurationViews", TLArg(*viewCountOutput, "ViewCountOutput"));
 
-                if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                    if (viewCapacityInput) {
+                if (viewCapacityInput) {
+                    if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                         // Apply resolution scaling.
 #pragma warning(push)
 #pragma warning(disable : 4244)
@@ -192,39 +192,44 @@ namespace {
                                         views[2].recommendedImageRectHeight,
                                         m_focusResolutionFactor * m_focusHorizontalScale,
                                         m_focusResolutionFactor * m_focusVerticalScale));
+
+                        for (uint32_t i = 0; i < *viewCountOutput; i++) {
+                            // Propagate the maximum.
+                            views[i].maxImageRectWidth =
+                                std::max(views[i].maxImageRectWidth, views[i].recommendedImageRectWidth);
+                            views[i].maxImageRectHeight =
+                                std::max(views[i].maxImageRectHeight, views[i].recommendedImageRectHeight);
+                        }
                     }
 
-                    for (uint32_t i = 0; i < viewCapacityInput; i++) {
-                        // Propagate the maximum.
-                        views[i].maxImageRectWidth =
-                            std::max(views[i].maxImageRectWidth, views[i].recommendedImageRectWidth);
-                        views[i].maxImageRectHeight =
-                            std::max(views[i].maxImageRectHeight, views[i].recommendedImageRectHeight);
+                    if (IsTraceEnabled()) {
+                        for (uint32_t i = 0; i < *viewCountOutput; i++) {
+                            TraceLoggingWrite(
+                                g_traceProvider,
+                                "xrEnumerateViewConfigurationViews",
+                                TLArg(views[i].maxImageRectWidth, "MaxImageRectWidth"),
+                                TLArg(views[i].maxImageRectHeight, "MaxImageRectHeight"),
+                                TLArg(views[i].maxSwapchainSampleCount, "MaxSwapchainSampleCount"),
+                                TLArg(views[i].recommendedImageRectWidth, "RecommendedImageRectWidth"),
+                                TLArg(views[i].recommendedImageRectHeight, "RecommendedImageRectHeight"),
+                                TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
+                        }
 
-                        TraceLoggingWrite(
-                            g_traceProvider,
-                            "xrEnumerateViewConfigurationViews",
-                            TLArg(views[i].maxImageRectWidth, "MaxImageRectWidth"),
-                            TLArg(views[i].maxImageRectHeight, "MaxImageRectHeight"),
-                            TLArg(views[i].maxSwapchainSampleCount, "MaxSwapchainSampleCount"),
-                            TLArg(views[i].recommendedImageRectWidth, "RecommendedImageRectWidth"),
-                            TLArg(views[i].recommendedImageRectHeight, "RecommendedImageRectHeight"),
-                            TLArg(views[i].recommendedSwapchainSampleCount, "RecommendedSwapchainSampleCount"));
+                        // Useful to log fovMutable as well.
+                        XrViewConfigurationProperties viewConfigurationProperties{
+                            XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
+                        CHECK_XRCMD(OpenXrApi::xrGetViewConfigurationProperties(
+                            instance, systemId, viewConfigurationType, &viewConfigurationProperties));
+                        TraceLoggingWrite(g_traceProvider,
+                                          "xrEnumerateViewConfigurationViews",
+                                          TLArg(!!viewConfigurationProperties.fovMutable, "FovMutable"));
                     }
                 }
-
-                // Useful to log fovMutable as well.
-                XrViewConfigurationProperties viewConfigurationProperties{XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
-                CHECK_XRCMD(OpenXrApi::xrGetViewConfigurationProperties(
-                    instance, systemId, viewConfigurationType, &viewConfigurationProperties));
-                TraceLoggingWrite(g_traceProvider,
-                                  "xrEnumerateViewConfigurationViews",
-                                  TLArg(!!viewConfigurationProperties.fovMutable, "FovMutable"));
             }
 
             // Undo our changes to the app structs.
             if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                for (uint32_t i = 0; i < viewCapacityInput; i++) {
+                for (uint32_t i = 0; i < std::min((uint32_t)foveatedView.size(), viewCapacityInput); i++) {
                     views[i].next = foveatedView[i].next;
                 }
             }
@@ -294,6 +299,14 @@ namespace {
                 TLArg(xr::ToCString(beginInfo->primaryViewConfigurationType), "PrimaryViewConfigurationType"));
 
             const XrResult result = OpenXrApi::xrBeginSession(session, beginInfo);
+
+            if (XR_SUCCEEDED(result)) {
+                if (beginInfo->primaryViewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    Log("Application is using Quad Views for this session.\n");
+                } else {
+                    Log("Application is not using Quad Views for this session.\n");
+                }
+            }
 
             m_initialized = false;
 
@@ -384,40 +397,44 @@ namespace {
                                   TLArg(*viewCountOutput, "ViewCountOutput"),
                                   TLArg(viewState->viewStateFlags, "ViewStateFlags"));
 
-                for (uint32_t i = 0; i < *viewCountOutput; i++) {
-                    TraceLoggingWrite(g_traceProvider,
-                                      "xrLocateViews",
-                                      TLArg(xr::ToString(views[i].pose).c_str(), "Pose"),
-                                      TLArg(xr::ToString(views[i].fov).c_str(), "Fov"));
-                }
+                if (viewCapacityInput) {
+                    if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                        // Apply focus region scaling.
+                        const auto scaleFov = [](float angleLower, float angleUpper, float scale) {
+                            const float angleCenter = (angleLower + angleUpper) / 2;
+                            const float angleSpread = angleUpper - angleLower;
+                            const float angleSpreadScaled = angleSpread * scale;
+                            const float angleLowerScaled = angleCenter - (angleSpreadScaled / 2);
+                            const float angleUpperScaled = angleCenter + (angleSpreadScaled / 2);
 
-                if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                    // Apply focus region scaling.
-                    const auto scaleFov = [](float angleLower, float angleUpper, float scale) {
-                        const float angleCenter = (angleLower + angleUpper) / 2;
-                        const float angleSpread = angleUpper - angleLower;
-                        const float angleSpreadScaled = angleSpread * scale;
-                        const float angleLowerScaled = angleCenter - (angleSpreadScaled / 2);
-                        const float angleUpperScaled = angleCenter + (angleSpreadScaled / 2);
+                            return std::make_pair(angleLowerScaled, angleUpperScaled);
+                        };
+                        std::tie(views[2].fov.angleDown, views[2].fov.angleUp) =
+                            scaleFov(views[2].fov.angleDown, views[2].fov.angleUp, m_focusVerticalScale);
+                        std::tie(views[2].fov.angleLeft, views[2].fov.angleRight) =
+                            scaleFov(views[2].fov.angleLeft, views[2].fov.angleRight, m_focusHorizontalScale);
+                        std::tie(views[3].fov.angleDown, views[3].fov.angleUp) =
+                            scaleFov(views[3].fov.angleDown, views[3].fov.angleUp, m_focusVerticalScale);
+                        std::tie(views[3].fov.angleLeft, views[3].fov.angleRight) =
+                            scaleFov(views[3].fov.angleLeft, views[3].fov.angleRight, m_focusHorizontalScale);
 
-                        return std::make_pair(angleLowerScaled, angleUpperScaled);
-                    };
-                    std::tie(views[2].fov.angleDown, views[2].fov.angleUp) =
-                        scaleFov(views[2].fov.angleDown, views[2].fov.angleUp, m_focusVerticalScale);
-                    std::tie(views[2].fov.angleLeft, views[2].fov.angleRight) =
-                        scaleFov(views[2].fov.angleLeft, views[2].fov.angleRight, m_focusHorizontalScale);
-                    std::tie(views[3].fov.angleDown, views[3].fov.angleUp) =
-                        scaleFov(views[3].fov.angleDown, views[3].fov.angleUp, m_focusVerticalScale);
-                    std::tie(views[3].fov.angleLeft, views[3].fov.angleRight) =
-                        scaleFov(views[3].fov.angleLeft, views[3].fov.angleRight, m_focusHorizontalScale);
+                        std::unique_lock lock(m_focusFovMutex);
 
-                    std::unique_lock lock(m_focusFovMutex);
+                        m_focusFovForDisplayTime.insert_or_assign(viewLocateInfo->displayTime,
+                                                                  std::make_pair(views[2].fov, views[3].fov));
+                        TraceLoggingWrite(g_traceProvider,
+                                          "xrLocateViews",
+                                          TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                    }
 
-                    m_focusFovForDisplayTime.insert_or_assign(viewLocateInfo->displayTime,
-                                                              std::make_pair(views[2].fov, views[3].fov));
-                    TraceLoggingWrite(g_traceProvider,
-                                      "xrLocateViews",
-                                      TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                    if (IsTraceEnabled()) {
+                        for (uint32_t i = 0; i < *viewCountOutput; i++) {
+                            TraceLoggingWrite(g_traceProvider,
+                                              "xrLocateViews",
+                                              TLArg(xr::ToString(views[i].pose).c_str(), "Pose"),
+                                              TLArg(xr::ToString(views[i].fov).c_str(), "Fov"));
+                        }
+                    }
                 }
             }
 
