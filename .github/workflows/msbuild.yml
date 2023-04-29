@@ -70,4 +70,6 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: Setup
-        path: installer/output/Varjo-Foveated.msi
+        path: |
+          installer/output/Varjo-Foveated.msi
+          bin/x64/Release/XR_APILAYER_MBUCCHIA_varjo_foveated.pdb
