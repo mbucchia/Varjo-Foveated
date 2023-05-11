@@ -133,6 +133,30 @@ namespace {
             return XR_SUCCESS;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrEnumerateViewConfigurations
+        XrResult xrEnumerateViewConfigurations(XrInstance instance,
+                                               XrSystemId systemId,
+                                               uint32_t viewConfigurationTypeCapacityInput,
+                                               uint32_t* viewConfigurationTypeCountOutput,
+                                               XrViewConfigurationType* viewConfigurationTypes) override {
+            TraceLoggingWrite(g_traceProvider,
+                              "xrEnumerateViewConfigurations",
+                              TLXArg(instance, "Instance"),
+                              TLArg((int)systemId, "SystemId"),
+                              TLArg(viewConfigurationTypeCapacityInput, "ViewCapacityInput"));
+
+            *viewConfigurationTypeCountOutput = 1;
+            TraceLoggingWrite(g_traceProvider,
+                              "xrEnumerateViewConfigurations",
+                              TLArg(*viewConfigurationTypeCountOutput, "ViewConfigurationTypeCountOutput"));
+
+            if (viewConfigurationTypeCapacityInput && viewConfigurationTypes) {
+                viewConfigurationTypes[0] = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
+            }
+
+            return XR_SUCCESS;
+        }
+
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrEnumerateViewConfigurationViews
         XrResult xrEnumerateViewConfigurationViews(XrInstance instance,
                                                    XrSystemId systemId,

@@ -1,5 +1,6 @@
 # The list of OpenXR functions our layer will override.
 override_functions = [
+    "xrEnumerateViewConfigurations",
     "xrEnumerateViewConfigurationViews",
     "xrCreateSwapchain",
     "xrDestroySwapchain",
