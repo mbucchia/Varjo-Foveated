@@ -18,6 +18,12 @@ More information on [the wiki](https://github.com/mbucchia/Varjo-Foveated/wiki)!
 
 For troubleshooting, the log file can be found at `%LocalAppData%\Varjo-Foveated\varjo-foveated.log`.
 
+## Donate
+
+Donations are welcome and totally optional. Please use [my GitHub sponsorship page](https://github.com/sponsors/mbucchia) to make one-time or recurring donations!
+
+Thank you!
+
 ## Special thanks
 
 Thanks to Varjo for providing me with an Aero for development.
