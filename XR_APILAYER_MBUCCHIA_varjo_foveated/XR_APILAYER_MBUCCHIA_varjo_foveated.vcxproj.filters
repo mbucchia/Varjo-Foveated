@@ -32,6 +32,9 @@
     <ClInclude Include="framework\util.h">
       <Filter>Framework</Filter>
     </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -64,5 +67,8 @@
     <None Include="packages.config" />
     <None Include="module.def" />
     <None Include="..\settings.cfg" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc" />
   </ItemGroup>
 </Project>
