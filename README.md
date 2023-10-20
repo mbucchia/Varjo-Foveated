@@ -2,13 +2,15 @@
 
 In layperson's terms:
 
-This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Varjo headset in Digital Combat Simulation (DCS) World when using the latest OpenBeta with native OpenXR support.
+This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Varjo headset in Digital Combat Simulation (DCS) World when using OpenXR.
 
 In technical terms:
 
 This software enables OpenXR apps developed with [XR_VARJO_quad_views](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_quad_views) support to use [XR_VARJO_foveated_rendering](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_foveated_rendering) without code changes.
 
 DISCLAIMER: This software is distributed as-is, without any warranties or conditions of any kind. Use at your own risks.
+
+# Details and instructions on the [the wiki](https://github.com/mbucchia/Varjo-Foveated/wiki)!
 
 ## Setup
 
